@@ -1,7 +1,7 @@
 // Author: David M. Anderson
 // Built with AI assistance (Claude, Anthropic)
 
-package spauth
+package graphauth
 
 import (
 	"bytes"
@@ -77,7 +77,7 @@ func TestReplaceMigratesLegacyCacheOnce(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	got, err := readThrough(newFileCache(shared, legacy))
+	got, err := readThrough(newFileCache(shared, legacy, SharePoint.sealName()))
 	if err != nil {
 		t.Fatalf("first read: %v", err)
 	}
@@ -95,7 +95,7 @@ func TestReplaceMigratesLegacyCacheOnce(t *testing.T) {
 	if err := writeCacheFile(legacy, []byte(`{"from":"stale"}`)); err != nil {
 		t.Fatal(err)
 	}
-	got, err = readThrough(newFileCache(shared, legacy))
+	got, err = readThrough(newFileCache(shared, legacy, SharePoint.sealName()))
 	if err != nil {
 		t.Fatalf("second read: %v", err)
 	}
@@ -103,7 +103,7 @@ func TestReplaceMigratesLegacyCacheOnce(t *testing.T) {
 		t.Errorf("second read returned %q, want the shared cache untouched", got)
 	}
 
-	got, err = readThrough(newFileCache(filepath.Join(dir, "none", "sp-token.json"), filepath.Join(dir, "missing", "sp-token.json")))
+	got, err = readThrough(newFileCache(filepath.Join(dir, "none", "sp-token.json"), filepath.Join(dir, "missing", "sp-token.json"), SharePoint.sealName()))
 	if err != nil || got != "" {
 		t.Errorf("read with neither file = %q, %v; want an empty cache and no error", got, err)
 	}
@@ -134,7 +134,7 @@ func withFakeSealing(t *testing.T) {
 func TestExportSealsAndReplaceOpens(t *testing.T) {
 	withFakeSealing(t)
 	path := filepath.Join(t.TempDir(), "sp-token.json")
-	c := newFileCache(path, "")
+	c := newFileCache(path, "", SharePoint.sealName())
 	if err := c.Export(context.Background(), marshaler(`{"rt":1}`), cache.ExportHints{}); err != nil {
 		t.Fatalf("Export: %v", err)
 	}
@@ -155,7 +155,7 @@ func TestReplaceSealsPlaintextCache(t *testing.T) {
 	if err := writeCacheFile(path, []byte(`{"rt":1}`)); err != nil {
 		t.Fatal(err)
 	}
-	if got, err := readThrough(newFileCache(path, "")); err != nil || got != `{"rt":1}` {
+	if got, err := readThrough(newFileCache(path, "", SharePoint.sealName())); err != nil || got != `{"rt":1}` {
 		t.Errorf("read = %q, %v; want the plaintext cache", got, err)
 	}
 	if data, _ := os.ReadFile(path); string(data) != `sealed:{"rt":1}` {
@@ -171,7 +171,7 @@ func TestReplaceSealsMigratedLegacyCache(t *testing.T) {
 	if err := writeCacheFile(legacy, []byte(`{"from":"legacy"}`)); err != nil {
 		t.Fatal(err)
 	}
-	if got, err := readThrough(newFileCache(shared, legacy)); err != nil || got != `{"from":"legacy"}` {
+	if got, err := readThrough(newFileCache(shared, legacy, SharePoint.sealName())); err != nil || got != `{"from":"legacy"}` {
 		t.Errorf("read = %q, %v; want the legacy cache", got, err)
 	}
 	if data, _ := os.ReadFile(shared); string(data) != `sealed:{"from":"legacy"}` {
@@ -212,7 +212,7 @@ func TestReplaceKeepsLegacyWhenSealingUnavailableThisCall(t *testing.T) {
 	if err := writeCacheFile(legacy, []byte(`{"from":"legacy"}`)); err != nil {
 		t.Fatal(err)
 	}
-	if got, err := readThrough(newFileCache(shared, legacy)); err != nil || got != `{"from":"legacy"}` {
+	if got, err := readThrough(newFileCache(shared, legacy, SharePoint.sealName())); err != nil || got != `{"from":"legacy"}` {
 		t.Errorf("read = %q, %v; want the legacy cache", got, err)
 	}
 	if data, _ := os.ReadFile(shared); string(data) != `{"from":"legacy"}` {
@@ -233,7 +233,7 @@ func TestReplaceRemovesLegacyWhenSealingEarlierMigration(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	if _, err := readThrough(newFileCache(shared, legacy)); err != nil {
+	if _, err := readThrough(newFileCache(shared, legacy, SharePoint.sealName())); err != nil {
 		t.Fatalf("read: %v", err)
 	}
 	if _, err := os.Stat(legacy); !errors.Is(err, os.ErrNotExist) {
@@ -249,7 +249,7 @@ func TestReplaceTreatsUnopenableCacheAsEmpty(t *testing.T) {
 	if err := writeCacheFile(path, []byte("foreign:xyz")); err != nil {
 		t.Fatal(err)
 	}
-	if got, err := readThrough(newFileCache(path, "")); err != nil || got != "" {
+	if got, err := readThrough(newFileCache(path, "", SharePoint.sealName())); err != nil || got != "" {
 		t.Errorf("read = %q, %v; want an empty cache and no error", got, err)
 	}
 }
@@ -267,7 +267,7 @@ func withoutSealing(t *testing.T) {
 
 // TestExportSealsForRealOnThisMachine drives fileCache through the real
 // atrest package, not the fakeProtector every other test in this file
-// stands in, so a break in the wiring between spauth and atrest — the wrong
+// stands in, so a break in the wiring between graphauth and atrest — the wrong
 // package var, the wrong seal name, an argument swapped — shows up here
 // rather than only after a release. What it can prove depends on what this
 // machine actually offers: a Windows or a Linux box with a reachable key
@@ -275,7 +275,7 @@ func withoutSealing(t *testing.T) {
 // fallback is exactly the pre-sealing behaviour instead of an error.
 func TestExportSealsForRealOnThisMachine(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "sp-token.json")
-	c := newFileCache(path, "")
+	c := newFileCache(path, "", SharePoint.sealName())
 	const plain = `{"real":1}`
 	if err := c.Export(context.Background(), marshaler(plain), cache.ExportHints{}); err != nil {
 		t.Fatalf("Export: %v", err)
@@ -284,7 +284,7 @@ func TestExportSealsForRealOnThisMachine(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	gotPlain, sealed, err := atrest.Open(sealName, stored)
+	gotPlain, sealed, err := atrest.Open(SharePoint.sealName(), stored)
 	if err != nil {
 		t.Fatalf("atrest.Open of what Export wrote: %v", err)
 	}
@@ -296,7 +296,7 @@ func TestExportSealsForRealOnThisMachine(t *testing.T) {
 	}
 	t.Logf("on this machine, Export sealed=%v (stored: %s)", sealed, stored)
 
-	got, err := readThrough(newFileCache(path, ""))
+	got, err := readThrough(newFileCache(path, "", SharePoint.sealName()))
 	if err != nil || got != plain {
 		t.Errorf("read back through Replace = %q, %v; want %q", got, err, plain)
 	}
@@ -327,7 +327,7 @@ func (u *captureUnmarshaler) Unmarshal(b []byte) error {
 // already did for their own directories.
 func TestCachePathHonoursXDG(t *testing.T) {
 	t.Setenv("XDG_CONFIG_HOME", "/tmp/xdg-test")
-	if got, want := CachePath(), filepath.Join("/tmp/xdg-test", "excelano", "sp-token.json"); got != want {
-		t.Errorf("CachePath() = %q, want %q", got, want)
+	if got, want := SharePoint.CachePath(), filepath.Join("/tmp/xdg-test", "excelano", "sp-token.json"); got != want {
+		t.Errorf("SharePoint.CachePath() = %q, want %q", got, want)
 	}
 }

@@ -1,4 +1,7 @@
-package spauth
+// Author: David M. Anderson
+// Built with AI assistance (Claude, Anthropic)
+
+package graphauth
 
 import (
 	"bytes"
@@ -17,12 +20,13 @@ import (
 const graphBaseURL = "https://graph.microsoft.com/v1.0"
 
 // GraphClient is a thin authenticated HTTP wrapper for the small Graph surface
-// the SharePoint tools use: JSON requests against list and drive resources,
-// streamed downloads, and the upload-session protocol for large files. Token
-// refresh is delegated to MSAL on every request.
+// the tools use: JSON requests, streamed downloads, and the upload-session
+// protocol for large files. Token refresh is delegated to MSAL on every
+// request.
 type GraphClient struct {
 	msal       public.Client
 	account    public.Account
+	scopes     []string
 	headers    http.Header
 	httpClient *http.Client
 }
@@ -45,10 +49,26 @@ func WithHeader(name, value string) Option {
 	return func(g *GraphClient) { g.headers.Set(name, value) }
 }
 
-func NewGraphClient(msal public.Client, account public.Account, opts ...Option) *GraphClient {
+// HTTPError is a non-2xx answer from Graph. Callers that need to tell one
+// status from another, such as a 412 from a stale If-Match, reach it with
+// errors.As.
+type HTTPError struct {
+	Method string
+	Path   string
+	Status int
+	Body   string
+}
+
+func (e *HTTPError) Error() string {
+	return fmt.Sprintf("graph %s %s returned %d: %s", e.Method, e.Path, e.Status, e.Body)
+}
+
+// NewGraphClient returns a client that acquires its tokens for app's scopes.
+func (app App) NewGraphClient(msal public.Client, account public.Account, opts ...Option) *GraphClient {
 	g := &GraphClient{
 		msal:       msal,
 		account:    account,
+		scopes:     app.Scopes,
 		headers:    http.Header{},
 		httpClient: &http.Client{Timeout: 5 * time.Minute},
 	}
@@ -61,7 +81,7 @@ func NewGraphClient(msal public.Client, account public.Account, opts ...Option) 
 // token returns a fresh access token, refreshing silently via the cached refresh
 // token if needed.
 func (g *GraphClient) token(ctx context.Context) (string, error) {
-	result, err := g.msal.AcquireTokenSilent(ctx, defaultScopes, public.WithSilentAccount(g.account))
+	result, err := g.msal.AcquireTokenSilent(ctx, g.scopes, public.WithSilentAccount(g.account))
 	if err != nil {
 		return "", fmt.Errorf("acquiring token: %w", err)
 	}
@@ -118,25 +138,45 @@ func (g *GraphClient) GetStream(ctx context.Context, path string) (io.ReadCloser
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		body, _ := io.ReadAll(resp.Body)
 		resp.Body.Close()
-		return nil, fmt.Errorf("graph GET %s returned %d: %s", req.URL.Path, resp.StatusCode, string(body))
+		return nil, &HTTPError{Method: http.MethodGet, Path: req.URL.Path, Status: resp.StatusCode, Body: string(body)}
 	}
 	return resp.Body, nil
 }
 
 // Patch issues an authenticated PATCH with a JSON body.
 func (g *GraphClient) Patch(ctx context.Context, path string, body interface{}) ([]byte, error) {
-	return g.bodyReq(ctx, http.MethodPatch, path, body)
+	return g.bodyReq(ctx, http.MethodPatch, path, "", body)
+}
+
+// PatchIfMatch issues a PATCH that Graph applies only while the resource still
+// carries etag. Resources with optimistic concurrency, such as Planner tasks,
+// refuse a PATCH without one; a stale etag comes back as a 412 HTTPError.
+func (g *GraphClient) PatchIfMatch(ctx context.Context, path, etag string, body interface{}) ([]byte, error) {
+	return g.bodyReq(ctx, http.MethodPatch, path, etag, body)
 }
 
 // Post issues an authenticated POST with a JSON body.
 func (g *GraphClient) Post(ctx context.Context, path string, body interface{}) ([]byte, error) {
-	return g.bodyReq(ctx, http.MethodPost, path, body)
+	return g.bodyReq(ctx, http.MethodPost, path, "", body)
 }
 
 // Delete issues an authenticated DELETE.
 func (g *GraphClient) Delete(ctx context.Context, path string) error {
+	return g.DeleteIfMatch(ctx, path, "")
+}
+
+// DeleteIfMatch issues a DELETE that Graph applies only while the resource
+// still carries etag, or unconditionally when etag is "".
+func (g *GraphClient) DeleteIfMatch(ctx context.Context, path, etag string) error {
 	_, err := g.doWithRetry(ctx, func() (*http.Request, error) {
-		return http.NewRequestWithContext(ctx, http.MethodDelete, graphBaseURL+path, nil)
+		req, err := http.NewRequestWithContext(ctx, http.MethodDelete, graphBaseURL+path, nil)
+		if err != nil {
+			return nil, err
+		}
+		if etag != "" {
+			req.Header.Set("If-Match", etag)
+		}
+		return req, nil
 	})
 	return err
 }
@@ -217,7 +257,7 @@ func (g *GraphClient) CancelUploadSession(ctx context.Context, uploadURL string)
 	resp.Body.Close()
 }
 
-func (g *GraphClient) bodyReq(ctx context.Context, method, path string, body interface{}) ([]byte, error) {
+func (g *GraphClient) bodyReq(ctx context.Context, method, path, etag string, body interface{}) ([]byte, error) {
 	data, err := json.Marshal(body)
 	if err != nil {
 		return nil, fmt.Errorf("marshaling request body: %w", err)
@@ -228,6 +268,9 @@ func (g *GraphClient) bodyReq(ctx context.Context, method, path string, body int
 			return nil, err
 		}
 		req.Header.Set("Content-Type", "application/json")
+		if etag != "" {
+			req.Header.Set("If-Match", etag)
+		}
 		return req, nil
 	})
 }
@@ -296,7 +339,7 @@ func (g *GraphClient) doWithRetry(ctx context.Context, build func() (*http.Reque
 		}
 
 		if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-			return nil, fmt.Errorf("graph %s %s returned %d: %s", req.Method, req.URL.Path, resp.StatusCode, string(body))
+			return nil, &HTTPError{Method: req.Method, Path: req.URL.Path, Status: resp.StatusCode, Body: string(body)}
 		}
 		return body, nil
 	}

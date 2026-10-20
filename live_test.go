@@ -1,13 +1,13 @@
 //go:build live
 
-package spauth
+package graphauth
 
 // Live tests run against a real tenant through the normal token cache. They are
 // the pre-release pass: CI cannot hold a token (device-code needs a human, and a
 // refresh token in a public repo's secrets would be a live credential to the
 // tenant), so these run locally, on a machine that has signed in once.
 //
-//	SPAUTH_LIVE_SITE=https://<tenant>.sharepoint.com/sites/<test-site> go test -tags live ./...
+//	GRAPHAUTH_LIVE_SITE=https://<tenant>.sharepoint.com/sites/<test-site> go test -tags live ./...
 //
 // The site's default document library is the fixture. Every test owns what it
 // creates under a folder named for the run and removes it on the way out, so
@@ -33,13 +33,13 @@ import (
 // A silent skip would read as a pass to the person running the release loop.
 func liveSite(t *testing.T) *url.URL {
 	t.Helper()
-	raw := os.Getenv("SPAUTH_LIVE_SITE")
+	raw := os.Getenv("GRAPHAUTH_LIVE_SITE")
 	if raw == "" {
-		t.Fatal("SPAUTH_LIVE_SITE is not set; point it at a SharePoint test site to run the live tests")
+		t.Fatal("GRAPHAUTH_LIVE_SITE is not set; point it at a SharePoint test site to run the live tests")
 	}
 	u, err := url.Parse(raw)
 	if err != nil || u.Host == "" {
-		t.Fatalf("SPAUTH_LIVE_SITE %q is not a URL", raw)
+		t.Fatalf("GRAPHAUTH_LIVE_SITE %q is not a URL", raw)
 	}
 	return u
 }
@@ -48,16 +48,16 @@ func liveSite(t *testing.T) *url.URL {
 // device-code flow, so the machine has to have signed in once already.
 func liveClient(t *testing.T) (public.Client, public.AuthResult) {
 	t.Helper()
-	client, err := NewPublicClient(CachePath(), "")
+	client, err := SharePoint.NewPublicClient(SharePoint.CachePath(), "")
 	if err != nil {
 		t.Fatal(err)
 	}
 	restore := interactive
 	interactive = func() bool { return false }
 	t.Cleanup(func() { interactive = restore })
-	result, err := Authenticate(context.Background(), client)
+	result, err := SharePoint.Authenticate(context.Background(), client)
 	if err != nil {
-		t.Fatalf("no usable session in %s; sign in with any Excelano SharePoint tool first: %v", CachePath(), err)
+		t.Fatalf("no usable session in %s; sign in with any Excelano SharePoint tool first: %v", SharePoint.CachePath(), err)
 	}
 	return client, result
 }
@@ -66,7 +66,7 @@ var guidRe = regexp.MustCompile(`^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4
 
 func TestLiveStatusIsSignedIn(t *testing.T) {
 	client, _ := liveClient(t)
-	st, err := CheckStatus(context.Background(), client, CachePath())
+	st, err := SharePoint.CheckStatus(context.Background(), client, SharePoint.CachePath())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -92,7 +92,7 @@ func TestLiveGraphClientRoundTrip(t *testing.T) {
 	site := liveSite(t)
 	client, result := liveClient(t)
 	ctx := context.Background()
-	g := NewGraphClient(client, result.Account)
+	g := SharePoint.NewGraphClient(client, result.Account)
 
 	body, err := g.Get(ctx, fmt.Sprintf("/sites/%s:%s", site.Host, site.Path), nil)
 	if err != nil {
@@ -119,9 +119,9 @@ func TestLiveGraphClientRoundTrip(t *testing.T) {
 		t.Fatalf("drive entry has no id: %v", err)
 	}
 
-	folder := fmt.Sprintf("spauth-live-%d", time.Now().UnixNano())
+	folder := fmt.Sprintf("graphauth-live-%d", time.Now().UnixNano())
 	name := "probe.txt"
-	content := []byte("spauth live probe " + folder + "\n")
+	content := []byte("graphauth live probe " + folder + "\n")
 	itemPath := func(n string) string {
 		return fmt.Sprintf("/drives/%s/root:/%s/%s", drive.ID, folder, url.PathEscape(n))
 	}

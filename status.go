@@ -1,4 +1,7 @@
-package spauth
+// Author: David M. Anderson
+// Built with AI assistance (Claude, Anthropic)
+
+package graphauth
 
 import (
 	"context"
@@ -14,11 +17,7 @@ import (
 	"github.com/AzureAD/microsoft-authentication-library-for-go/apps/public"
 )
 
-// familyTools names every binary that shares the session, for the messages
-// that tell a caller where a sign-in can be done.
-const familyTools = "xql sp, xftp, xcp, xfind, xsync and xtree"
-
-// Status is the state of the shared session, as the family's bare `auth`
+// Status is the state of an App's session, as its tools' bare `auth`
 // command reports it. An absent session is an answer, not a failure, so the
 // zero SignedIn carries a Reason rather than an error.
 type Status struct {
@@ -45,7 +44,7 @@ type Status struct {
 // cache is unreadable, or the sign-in server could not be reached. A server
 // that answers and rejects the session is a determined answer: not signed in,
 // with the rejection as the reason.
-func CheckStatus(ctx context.Context, client public.Client, cachePath string) (Status, error) {
+func (app App) CheckStatus(ctx context.Context, client public.Client, cachePath string) (Status, error) {
 	st := Status{Cache: cachePath}
 
 	accounts, err := client.Accounts(ctx)
@@ -60,7 +59,7 @@ func CheckStatus(ctx context.Context, client public.Client, cachePath string) (S
 	st.Account = account.PreferredUsername
 	st.Tenant = tenantOf(account)
 
-	result, err := client.AcquireTokenSilent(ctx, defaultScopes, public.WithSilentAccount(account))
+	result, err := client.AcquireTokenSilent(ctx, app.Scopes, public.WithSilentAccount(account))
 	if err != nil {
 		var call msalerrors.CallErr
 		if errors.As(err, &call) && call.Resp != nil {
@@ -92,14 +91,14 @@ func tenantOf(account public.Account) string {
 	return account.Realm
 }
 
-// WriteStatus renders st for a human. The layout is the same in every tool of
-// the family so a reader learns it once.
-func WriteStatus(w io.Writer, st Status) {
+// WriteStatus renders st for a human. The layout is the same in every tool
+// so a reader learns it once.
+func (app App) WriteStatus(w io.Writer, st Status) {
 	if !st.SignedIn {
 		fmt.Fprintf(w, "Not signed in: %s\n", st.Reason)
 		fmt.Fprintf(w, "Cache          %s\n", st.Cache)
 		fmt.Fprintln(w)
-		fmt.Fprintf(w, "Run any Excelano SharePoint tool once from an interactive terminal to sign in;\none session covers %s.\n", familyTools)
+		fmt.Fprintln(w, app.signInAdvice())
 		return
 	}
 	fmt.Fprintf(w, "Signed in as   %s\n", st.Account)
@@ -127,9 +126,17 @@ func untilPhrase(d time.Duration) string {
 	return fmt.Sprintf("in %dh%02dm", h, m)
 }
 
-// AuthCommand is the family's bare `auth` subcommand: it reports the shared
-// session and exits 0 whether or not one exists, so a caller can ask before it
-// tries rather than learning the state from a failed attempt. args are the
+// signInAdvice tells a reader where a sign-in can be done.
+func (app App) signInAdvice() string {
+	if len(app.Tools) > 1 {
+		return fmt.Sprintf("Run any %s tool once from an interactive terminal to sign in;\none session covers %s.", app.Name, app.toolList())
+	}
+	return fmt.Sprintf("Run %s once from an interactive terminal to sign in.", app.toolList())
+}
+
+// AuthCommand is the bare `auth` subcommand: it reports the App's session and
+// exits 0 whether or not one exists, so a caller can ask before it tries
+// rather than learning the state from a failed attempt. args are the
 // arguments after the subcommand name; the one flag is --json. tool is the
 // binary's name, for the usage text. legacyCachePath is the per-tool cache the
 // binary kept before the cache was shared, adopted here the same way it is on
@@ -137,12 +144,12 @@ func untilPhrase(d time.Duration) string {
 //
 // Exit codes follow the family's contract: 0 reported, 1 the state could not
 // be determined, 2 bad invocation.
-func AuthCommand(ctx context.Context, tool, legacyCachePath string, args []string, stdout, stderr io.Writer) int {
+func (app App) AuthCommand(ctx context.Context, tool, legacyCachePath string, args []string, stdout, stderr io.Writer) int {
 	fs := flag.NewFlagSet(tool+" auth", flag.ContinueOnError)
 	asJSON := fs.Bool("json", false, "print the report as a JSON object")
 	usage := func(w io.Writer) {
 		fmt.Fprintf(w, "Usage: %s auth [--json]\n\n", tool)
-		fmt.Fprintf(w, "Reports the SharePoint session shared by %s:\naccount, tenant, token expiry and scopes. Exits 0 whether or not a session\nexists; the report is the answer. Signing in is not this command's job: run any\ntool in the family once from an interactive terminal.\n\n", familyTools)
+		fmt.Fprintf(w, "Reports the %s session: account, tenant, token expiry and\nscopes. Exits 0 whether or not a session exists; the report is the answer.\nSigning in is not this command's job.\n%s\n\n", app.Name, app.signInAdvice())
 		fmt.Fprintln(w, "Flags:")
 		fmt.Fprintln(w, "  --json  print the report as a JSON object")
 		fmt.Fprintln(w)
@@ -166,12 +173,12 @@ func AuthCommand(ctx context.Context, tool, legacyCachePath string, args []strin
 		return 2
 	}
 
-	client, err := NewPublicClient(CachePath(), legacyCachePath)
+	client, err := app.NewPublicClient(app.CachePath(), legacyCachePath)
 	if err != nil {
 		fmt.Fprintf(stderr, "%s auth: %v\n", tool, err)
 		return 1
 	}
-	st, err := CheckStatus(ctx, client, CachePath())
+	st, err := app.CheckStatus(ctx, client, app.CachePath())
 	if err != nil {
 		fmt.Fprintf(stderr, "%s auth: could not determine the session state: %v%s\n", tool, err, HintForAuthError(err))
 		return 1
@@ -186,6 +193,6 @@ func AuthCommand(ctx context.Context, tool, legacyCachePath string, args []strin
 		}
 		return 0
 	}
-	WriteStatus(stdout, st)
+	app.WriteStatus(stdout, st)
 	return 0
 }

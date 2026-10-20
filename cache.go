@@ -1,7 +1,7 @@
 // Author: David M. Anderson
 // Built with AI assistance (Claude, Anthropic)
 
-package spauth
+package graphauth
 
 import (
 	"bytes"
@@ -15,16 +15,12 @@ import (
 	"github.com/excelano/atrest"
 )
 
-// cacheFileName is the token cache's basename, the same in the shared
-// location and in every legacy per-tool directory.
-const cacheFileName = "sp-token.json"
-
-// CachePath returns the token cache every tool on the registration shares:
-// $XDG_CONFIG_HOME/excelano/sp-token.json, or ~/.config/excelano/sp-token.json.
-// The directory is named for the registration rather than for either repo,
-// because xql is not an xfiles tool and the cache belongs to neither.
-func CachePath() string {
-	return filepath.Join(configHome(), "excelano", cacheFileName)
+// CachePath returns the token cache every tool on the App shares:
+// $XDG_CONFIG_HOME/excelano/<Cache>.json, or ~/.config/excelano/<Cache>.json.
+// The directory is named for the publisher rather than for any one repo,
+// because an App's tools can span repos and the cache belongs to none of them.
+func (app App) CachePath() string {
+	return filepath.Join(configHome(), "excelano", app.Cache+".json")
 }
 
 func configHome() string {
@@ -41,7 +37,9 @@ func configHome() string {
 // sealName labels the cache to atrest, which binds it into the protection.
 // Changing it makes every sealed cache unreadable, costing each user a
 // sign-in.
-const sealName = "excelano/sp-token"
+func (app App) sealName() string {
+	return "excelano/" + app.Cache
+}
 
 // The atrest calls are variables so tests can stand in a sealing platform on
 // hosts that have none.
@@ -77,12 +75,13 @@ var (
 // for one sign-in. Where nothing seals, it is left for such a binary to use,
 // and the consumer's uninstaller is what removes it.
 type fileCache struct {
-	path   string
-	legacy string
+	path     string
+	legacy   string
+	sealName string
 }
 
-func newFileCache(path, legacy string) *fileCache {
-	return &fileCache{path: path, legacy: legacy}
+func newFileCache(path, legacy, sealName string) *fileCache {
+	return &fileCache{path: path, legacy: legacy, sealName: sealName}
 }
 
 func (c *fileCache) Replace(ctx context.Context, target cache.Unmarshaler, hints cache.ReplaceHints) error {
@@ -112,7 +111,7 @@ func (c *fileCache) read() ([]byte, error) {
 		}
 		return nil, fmt.Errorf("reading token cache: %w", err)
 	}
-	plain, sealed, err := open(sealName, stored)
+	plain, sealed, err := open(c.sealName, stored)
 	if err != nil {
 		return nil, err
 	}
@@ -157,7 +156,7 @@ func (c *fileCache) Export(ctx context.Context, source cache.Marshaler, hints ca
 // it can fall back to returning its input unchanged — so that is read back
 // here by comparing what went in against what came out.
 func (c *fileCache) write(plain []byte) (sealed bool, err error) {
-	stored, err := seal(sealName, plain)
+	stored, err := seal(c.sealName, plain)
 	if err != nil {
 		return false, err
 	}

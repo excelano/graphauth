@@ -1,4 +1,4 @@
-package spauth
+package graphauth
 
 import (
 	"bytes"
@@ -43,11 +43,11 @@ func TestUntilPhrase(t *testing.T) {
 // a reason, no error, and no sign-in started.
 func TestCheckStatusWithNoAccount(t *testing.T) {
 	cache := filepath.Join(t.TempDir(), "sp-token.json")
-	client, err := NewPublicClient(cache, "")
+	client, err := SharePoint.NewPublicClient(cache, "")
 	if err != nil {
 		t.Fatal(err)
 	}
-	st, err := CheckStatus(context.Background(), client, cache)
+	st, err := SharePoint.CheckStatus(context.Background(), client, cache)
 	if err != nil {
 		t.Fatalf("CheckStatus: %v", err)
 	}
@@ -69,7 +69,7 @@ func TestAuthCommand(t *testing.T) {
 	ctx := context.Background()
 
 	var out, errOut bytes.Buffer
-	if code := AuthCommand(ctx, "xftp", "", nil, &out, &errOut); code != 0 {
+	if code := SharePoint.AuthCommand(ctx, "xftp", "", nil, &out, &errOut); code != 0 {
 		t.Fatalf("exit %d with no session, want 0; stderr: %s", code, errOut.String())
 	}
 	if !strings.HasPrefix(out.String(), "Not signed in") {
@@ -80,14 +80,14 @@ func TestAuthCommand(t *testing.T) {
 	}
 
 	out.Reset()
-	if code := AuthCommand(ctx, "xftp", "", []string{"--json"}, &out, &errOut); code != 0 {
+	if code := SharePoint.AuthCommand(ctx, "xftp", "", []string{"--json"}, &out, &errOut); code != 0 {
 		t.Fatalf("exit %d for --json, want 0; stderr: %s", code, errOut.String())
 	}
 	var st Status
 	if err := json.Unmarshal(out.Bytes(), &st); err != nil {
 		t.Fatalf("--json output is not JSON: %v\n%s", err, out.String())
 	}
-	if st.SignedIn || st.Reason == "" || st.Cache != CachePath() {
+	if st.SignedIn || st.Reason == "" || st.Cache != SharePoint.CachePath() {
 		t.Errorf("--json report = %+v, want signed_in false with a reason and the shared cache path", st)
 	}
 	if strings.Contains(out.String(), "token_expires") {
@@ -95,13 +95,13 @@ func TestAuthCommand(t *testing.T) {
 	}
 
 	out.Reset()
-	if code := AuthCommand(ctx, "xftp", "", []string{"-h"}, &out, &errOut); code != 0 || !strings.HasPrefix(out.String(), "Usage: xftp auth") {
+	if code := SharePoint.AuthCommand(ctx, "xftp", "", []string{"-h"}, &out, &errOut); code != 0 || !strings.HasPrefix(out.String(), "Usage: xftp auth") {
 		t.Errorf("-h: exit %d, stdout %q; want 0 and usage on stdout", code, out.String())
 	}
-	if code := AuthCommand(ctx, "xftp", "", []string{"--bogus"}, &out, &errOut); code != 2 {
+	if code := SharePoint.AuthCommand(ctx, "xftp", "", []string{"--bogus"}, &out, &errOut); code != 2 {
 		t.Errorf("unknown flag: exit %d, want 2", code)
 	}
-	if code := AuthCommand(ctx, "xftp", "", []string{"extra"}, &out, &errOut); code != 2 {
+	if code := SharePoint.AuthCommand(ctx, "xftp", "", []string{"extra"}, &out, &errOut); code != 2 {
 		t.Errorf("stray argument: exit %d, want 2", code)
 	}
 }
@@ -110,7 +110,7 @@ func TestAuthCommand(t *testing.T) {
 // so the renderer is checked on a fabricated status.
 func TestWriteStatusSignedIn(t *testing.T) {
 	var out bytes.Buffer
-	WriteStatus(&out, Status{
+	SharePoint.WriteStatus(&out, Status{
 		SignedIn:     true,
 		Account:      "someone@example.com",
 		Tenant:       "00000000-0000-0000-0000-000000000000",

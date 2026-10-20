@@ -1,9 +1,9 @@
-module github.com/excelano/spauth
+module github.com/excelano/graphauth
 
 go 1.26.0
 
-// A bump to MSAL reaches six shipped binaries, across xql and xfiles, on their
-// next release. Read the MSAL changelog before taking a minor.
+// A bump to MSAL reaches every consumer on its next release. Read the MSAL
+// changelog before taking a minor.
 require (
 	github.com/AzureAD/microsoft-authentication-library-for-go v1.10.0
 	github.com/excelano/atrest v0.1.1
