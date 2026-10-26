@@ -3,13 +3,15 @@ name: ci
 # The checks live in excelano/.github. This module is imported by other code,
 # so it calls the library policy: the binary checks plus a run against the
 # oldest Go version go.mod promises consumers.
+#
+# Author: David M. Anderson
+# Built with AI assistance (Claude, Anthropic)
+
 on:
   workflow_dispatch:
 
 jobs:
   ci:
     uses: excelano/.github/.github/workflows/go-lib-ci.yml@main
-    # The token cache is sealed only on Windows, and only a Windows runner
-    # executes that path.
     with:
       platforms: '["ubuntu-latest", "windows-latest"]'

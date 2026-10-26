@@ -4,6 +4,10 @@ name: CodeQL
 # same one and a correction reaches all of them at once. What stays here is when
 # to run and what to scan: that is this repo's business, the policy is the
 # fleet's. Same split as ci.yml.
+#
+# Author: David M. Anderson
+# Built with AI assistance (Claude, Anthropic)
+
 on:
   workflow_dispatch:
   schedule:
